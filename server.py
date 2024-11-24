@@ -9,7 +9,7 @@ server_socket.bind((HOST, PORT))
 print(f"Server listening on {HOST}:{PORT}")
 
 while True:
-    data, addr = server_socket.recvfrom(4096)
+    data, addr = server_socket.recvfrom(20480)
     
     if len(data) > 0:
         try:

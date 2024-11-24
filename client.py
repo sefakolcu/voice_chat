@@ -3,7 +3,7 @@ import threading
 import pyaudio
 import zlib
 
-CHUNK = 2048
+CHUNK = 3072
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100
@@ -30,7 +30,7 @@ def send_audio():
 def receive_audio():
     while True:
         try:
-            data, _ = client_socket.recvfrom(4096)
+            data, _ = client_socket.recvfrom(20480)
             if len(data) > 0:
                 try:
                     decompressed_data = zlib.decompress(data)
