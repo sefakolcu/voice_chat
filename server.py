@@ -9,12 +9,11 @@ server_socket.bind((HOST, PORT))
 
 print(f"Server listening on {HOST}:{PORT}")
 
-clients = set()  # To track connected clients
+clients = set()
 
 while True:
     data, addr = server_socket.recvfrom(20480)
 
-    # Add the sender to the clients set
     if addr not in clients:
         clients.add(addr)
         print(f"New client connected: {addr}")
@@ -28,9 +27,8 @@ while True:
             print(f"Decompression failed for {addr}: {e}")
             continue
 
-        # Broadcast to all other clients
         for client in clients:
-            if client != addr:  # Skip the sender
+            if client != addr:
                 try:
                     compressed_data = zlib.compress(data)
                     server_socket.sendto(compressed_data, client)
