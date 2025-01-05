@@ -41,19 +41,24 @@ class Voice_Chat(QtCore.QThread):
     def run(self):
         listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
         listener.start()
+        
+        send_thread = threading.Thread(target=self.send_audio, daemon=True)
+        receive_thread = threading.Thread(target=self.receive_audio, daemon=True)
+        send_thread.start()
+        receive_thread.start()
 
-        self.send_audio()
-        self.receive_audio()
+        send_thread.join()
+        receive_thread.join()
 
     def on_press(self, key):
         if hasattr(key, 'char') and key.char == PUSH_TO_TALK_KEY:
-            with is_sending_audio_lock:
-                is_sending_audio = True
+            with self.is_sending_audio_lock:
+                self.is_sending_audio = True
 
     def on_release(self, key):
         if hasattr(key, 'char') and key.char == PUSH_TO_TALK_KEY:
-            with is_sending_audio_lock:
-                is_sending_audio = False
+            with self.is_sending_audio_lock:
+                self.is_sending_audio = False
         if key == keyboard.Key.esc:
             return False
 
@@ -74,6 +79,24 @@ class Voice_Chat(QtCore.QThread):
                 time.sleep(max(0, 0.01 - elapsed_time))
             except Exception as e:
                 print(f"Send Audio Error: {e}")
+
+    def receive_audio(self):
+        while True:
+            try:
+                data, _ = self.client_socket.recvfrom(20480)
+                if len(data) > 0:
+                    print(f"Received data of size: {len(data)}")
+                    try:
+                        decompressed_data = zlib.decompress(data)
+                        audio_data = np.frombuffer(decompressed_data, dtype=np.int16)
+                        print(f"Decompressed audio data size: {len(audio_data)}")
+                        amplified_data = np.clip(audio_data * AMPLIFICATION_FACTOR, -32768, 32767).astype(np.int16)
+                        print(f"Amplified audio data size: {len(amplified_data)}")
+                        self.audio_received.emit(amplified_data.tobytes())
+                    except Exception as e:
+                        print(f"Decompression or amplification failed: {e}")
+            except Exception as e:
+                print(f"Receive Audio Error: {e}")
 
     def receive_audio(self):
         while True:
