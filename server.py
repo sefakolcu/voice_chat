@@ -27,6 +27,15 @@ while True:
             print(f"Decompression failed for {addr}: {e}")
             continue
 
+        # Echo back to the sender (the client that sent the data)
+        try:
+            compressed_data = zlib.compress(data)
+            server_socket.sendto(compressed_data, addr)  # Send back to the sender
+            print(f"Echoed data back to {addr}: {len(compressed_data)} bytes")
+        except Exception as e:
+            print(f"Failed to send data back to {addr}: {e}")
+
+        # Send the data to other clients
         for client in clients:
             if client != addr:
                 try:
