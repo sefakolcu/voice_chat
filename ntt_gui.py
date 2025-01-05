@@ -15,104 +15,47 @@ CHUNK = 3072
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100
-AMPLIFICATION_FACTOR = 1.0
+AMPLIFICATION_FACTOR = 1.5
 PUSH_TO_TALK_KEY = 'x'
 PUSH_TO_TALK_ACTIVE = False
-
-audio = pyaudio.PyAudio()
-stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
-output = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, output=True, frames_per_buffer=CHUNK)
 
 SERVER = '165.227.134.14'
 PORT = 5000
 
-is_sending_audio = False
-is_sending_audio_lock = threading.Lock()
-
 class Voice_Chat(QtCore.QThread):
-    audio_received = QtCore.pyqtSignal(bytes)
-
     def __init__(self, client_socket):
         super().__init__()
-        self.is_sending_audio = False
-        self.is_sending_audio_lock = threading.Lock()
         self.client_socket = client_socket
+        self.audio = pyaudio.PyAudio()
+        self.stream = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+        self.output = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, output=True, frames_per_buffer=CHUNK)
+        self.running = True
 
     def run(self):
-        listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
-        listener.start()
-        
         send_thread = threading.Thread(target=self.send_audio, daemon=True)
         receive_thread = threading.Thread(target=self.receive_audio, daemon=True)
         send_thread.start()
         receive_thread.start()
 
-        send_thread.join()
-        receive_thread.join()
-
-    def on_press(self, key):
-        if hasattr(key, 'char') and key.char == PUSH_TO_TALK_KEY:
-            with self.is_sending_audio_lock:
-                self.is_sending_audio = True
-
-    def on_release(self, key):
-        if hasattr(key, 'char') and key.char == PUSH_TO_TALK_KEY:
-            with self.is_sending_audio_lock:
-                self.is_sending_audio = False
-        if key == keyboard.Key.esc:
-            return False
-
     def send_audio(self):
-        while True:
-            if PUSH_TO_TALK_ACTIVE:
-                with self.is_sending_audio_lock:
-                    if not self.is_sending_audio:
-                        time.sleep(0.01)
-                        continue
+        while self.running:
             try:
-                start_time = time.time()
-                data = stream.read(CHUNK, exception_on_overflow=False)
+                data = self.stream.read(CHUNK, exception_on_overflow=False)
                 if len(data) > 0:
                     compressed_data = zlib.compress(data)
                     self.client_socket.sendto(compressed_data, (SERVER, PORT))
-                elapsed_time = time.time() - start_time
-                time.sleep(max(0, 0.01 - elapsed_time))
             except Exception as e:
                 print(f"Send Audio Error: {e}")
 
     def receive_audio(self):
-        while True:
+        while self.running:
             try:
                 data, _ = self.client_socket.recvfrom(20480)
-                if len(data) > 0:
-                    print(f"Received data of size: {len(data)}")
-                    try:
-                        decompressed_data = zlib.decompress(data)
-                        audio_data = np.frombuffer(decompressed_data, dtype=np.int16)
-                        print(f"Decompressed audio data size: {len(audio_data)}")
-                        amplified_data = np.clip(audio_data * AMPLIFICATION_FACTOR, -32768, 32767).astype(np.int16)
-                        print(f"Amplified audio data size: {len(amplified_data)}")
-                        self.audio_received.emit(amplified_data.tobytes())
-                    except Exception as e:
-                        print(f"Decompression or amplification failed: {e}")
-            except Exception as e:
-                print(f"Receive Audio Error: {e}")
-
-    def receive_audio(self):
-        while True:
-            try:
-                data, _ = self.client_socket.recvfrom(20480)
-                if len(data) > 0:
-                    print(f"Received data of size: {len(data)}")
-                    try:
-                        decompressed_data = zlib.decompress(data)
-                        audio_data = np.frombuffer(decompressed_data, dtype=np.int16)
-                        print(f"Decompressed audio data size: {len(audio_data)}")
-                        amplified_data = np.clip(audio_data * AMPLIFICATION_FACTOR, -32768, 32767).astype(np.int16)
-                        print(f"Amplified audio data size: {len(amplified_data)}")
-                        self.audio_received.emit(amplified_data.tobytes())
-                    except Exception as e:
-                        print(f"Decompression or amplification failed: {e}")
+                if data:
+                    decompressed_data = zlib.decompress(data)
+                    audio_data = np.frombuffer(decompressed_data, dtype=np.int16)
+                    amplified_data = np.clip(audio_data * AMPLIFICATION_FACTOR, -32768, 32767).astype(np.int16)
+                    self.output.write(amplified_data.tobytes())
             except Exception as e:
                 print(f"Receive Audio Error: {e}")
 
@@ -138,8 +81,8 @@ class MyApp(QtWidgets.QMainWindow):
         self.voice_chat = None
         self.is_connected = False
         self.client_socket = None
-        signal.signal(signal.SIGINT, self.cleanup_on_shutdown)  # For Ctrl+C
-        signal.signal(signal.SIGTERM, self.cleanup_on_shutdown)  # For termination signal
+        signal.signal(signal.SIGINT, self.cleanup_on_shutdown)
+        signal.signal(signal.SIGTERM, self.cleanup_on_shutdown)
         self.init_ui()
         self.fetch_user_data()
 
@@ -315,11 +258,10 @@ class MyApp(QtWidgets.QMainWindow):
         if self.is_connected:
             print("Already connected to the server.")
             self.update_connection_status()
-            return  # No need to connect again if already connected
-
+            return
         try:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.client_socket.bind(('', 0))  # Bind to any available port
+            self.client_socket.bind(('', 0))
             self.client_socket.connect((SERVER, PORT))
             self.is_connected = True
             print("Connected to server.")
@@ -335,8 +277,8 @@ class MyApp(QtWidgets.QMainWindow):
 
         try:
             if self.voice_chat is not None:
-                self.voice_chat.terminate()  # Terminate the Voice_Chat thread
-                self.voice_chat.wait()  # Wait for the thread to finish
+                self.voice_chat.terminate()
+                self.voice_chat.wait()
                 self.voice_chat = None
                 print("Voice chat stopped.")
 
@@ -370,19 +312,11 @@ class MyApp(QtWidgets.QMainWindow):
     def on_voice_channel_click(self, event):
         if self.voice_chat is None:
             self.voice_chat = Voice_Chat(self.client_socket)
-            self.voice_chat.audio_received.connect(self.play_received_audio)
             self.voice_chat.start()
             print("Voice Channel clicked. Audio threads started.")
         else:
             print("Voice chat already running.")
 
-    def play_received_audio(self, data):
-        try:
-            print(f"Received data of size: {len(data)}")
-            output.write(data)
-            print("Playing received audio.")
-        except Exception as e:
-            print(f"Error in playing received audio: {e}")
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication([])
